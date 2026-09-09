@@ -96,6 +96,28 @@ The default folds are:
 
 All models should use the same validation procedure for a fair comparison.
 
+### Long-Horizon Validation
+
+In addition to the yearly expanding-window folds, a long-horizon
+backtest is used to better approximate the final forecasting setting:
+
+| Training period | Validation period | Forecast horizon |
+|---|---|---|
+| 2010–2013 | 2014–2016 | 3 years |
+
+It can be created with:
+
+```python
+train_part, val_part = temporal_train_val_split(
+    train,
+    val_start_date="2014-01-01",
+)
+```
+
+The yearly expanding-window folds are used to evaluate model stability
+across different time periods, while the three-year holdout provides
+an additional long-horizon evaluation.
+
 ### Metric
 
 The shared evaluation metric is MAPE:
