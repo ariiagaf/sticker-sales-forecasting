@@ -1,1 +1,13 @@
-
+model,version,validation_scheme,fold,train_period,validation_period,mape,params
+group_median,v1,expanding_window,fold_1_2014,2010-01-01 to 2013-12-31,2014-01-01 to 2014-12-31,12.54953,"{""group_cols"": [""country"", ""store"", ""product""]}"
+group_median,v1,expanding_window,fold_2_2015,2010-01-01 to 2014-12-31,2015-01-01 to 2015-12-31,18.245439,"{""group_cols"": [""country"", ""store"", ""product""]}"
+group_median,v1,expanding_window,fold_3_2016,2010-01-01 to 2015-12-31,2016-01-01 to 2016-12-31,18.163489,"{""group_cols"": [""country"", ""store"", ""product""]}"
+group_median,v1,long_horizon,2014_2016,2010-01-01 to 2013-12-31,2014-01-01 to 2016-12-31,17.460368,"{""group_cols"": [""country"", ""store"", ""product""]}"
+seasonal_naive_last_year,v1,expanding_window,fold_1_2014,2010-01-01 to 2013-12-31,2014-01-01 to 2014-12-31,11.229063,"{""fallback"": ""group_median"", ""lag"": ""1 year""}"
+seasonal_naive_last_year,v1,expanding_window,fold_2_2015,2010-01-01 to 2014-12-31,2015-01-01 to 2015-12-31,15.90462,"{""fallback"": ""group_median"", ""lag"": ""1 year""}"
+seasonal_naive_last_year,v1,expanding_window,fold_3_2016,2010-01-01 to 2015-12-31,2016-01-01 to 2016-12-31,12.687882,"{""fallback"": ""group_median"", ""lag"": ""1 year""}"
+seasonal_naive_last_year,v1,long_horizon,2014_2016,2010-01-01 to 2013-12-31,2014-01-01 to 2016-12-31,17.019122,"{""fallback"": ""group_median"", ""lag"": ""1 year""}"
+ridge_calendar_one_hot,v1,expanding_window,fold_1_2014,2010-01-01 to 2013-12-31,2014-01-01 to 2014-12-31,13.276998,"{""alpha"": 1.0, ""target_transform"": ""log1p""}"
+ridge_calendar_one_hot,v1,expanding_window,fold_2_2015,2010-01-01 to 2014-12-31,2015-01-01 to 2015-12-31,22.081696,"{""alpha"": 1.0, ""target_transform"": ""log1p""}"
+ridge_calendar_one_hot,v1,expanding_window,fold_3_2016,2010-01-01 to 2015-12-31,2016-01-01 to 2016-12-31,18.220786,"{""alpha"": 1.0, ""target_transform"": ""log1p""}"
+ridge_calendar_one_hot,v1,long_horizon,2014_2016,2010-01-01 to 2013-12-31,2014-01-01 to 2016-12-31,23.907846,"{""alpha"": 1.0, ""target_transform"": ""log1p""}"
