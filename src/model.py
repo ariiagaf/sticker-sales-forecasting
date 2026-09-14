@@ -1,9 +1,10 @@
 import numpy as np
 from catboost import CatBoostRegressor
 
-MODEL_NAME = "catboost_raw"
-MODEL_VERSION = "v1"
+MODEL_NAME = "catboost_log"
+MODEL_VERSION = "v2"
 TARGET_COL = "num_sold"
+TARGET_TRANSFORM = "log1p"
 
 CATEGORICAL_FEATURES = [
     "country",
@@ -72,10 +73,12 @@ def fit_model(train_features, params: dict | None = None) -> CatBoostRegressor:
     if train_features[required_columns].isna().any().any():
         raise ValueError("Training features or target contain missing values.")
 
+    target = np.log1p(train_features[TARGET_COL]).to_numpy(dtype=float)
+
     model = create_model(params)
     model.fit(
         train_features[FEATURE_COLS],
-        train_features[TARGET_COL],
+        target,
     )
     return model
 
@@ -94,18 +97,27 @@ def predict_model(model: CatBoostRegressor, features) -> np.ndarray:
     if features[FEATURE_COLS].isna().any().any():
         raise ValueError("Prediction features contain missing values.")
 
-    predictions = np.asarray(
+    log_predictions = np.asarray(
         model.predict(features[FEATURE_COLS]),
         dtype=float,
     )
 
-    if predictions.shape != (len(features),):
+    if log_predictions.shape != (len(features),):
         raise ValueError("Expected one prediction per input row.")
 
+
+    if not np.isfinite(log_predictions).all():
+        raise ValueError("Log predictions contain NaN or infinite values.")
+
+    predictions = np.expm1(log_predictions)
+
     if not np.isfinite(predictions).all():
-        raise ValueError("Predictions contain NaN or infinite values.")
+        raise ValueError(
+            "Predictions contain NaN or infinite values after inverse transform."
+        )
 
     negative_count = int((predictions < 0).sum())
+    
     if negative_count:
         print(
             f"Clipping {negative_count} negative predictions to zero "
