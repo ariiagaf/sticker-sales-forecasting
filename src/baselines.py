@@ -11,7 +11,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from src.features import add_date_features
 from src.metrics import mape
-from src.preprocessing import drop_missing_target, load_data, preprocess_data
+from src.preprocessing import drop_missing_target, preprocess_data
 from src.validation import expanding_window_splits, temporal_train_val_split
 
 
@@ -221,7 +221,7 @@ def save_metrics(metrics_df: pd.DataFrame, output_path: str | Path) -> None:
 
 
 def load_training_data(train_path: str | Path) -> pd.DataFrame:
-    train, _ = load_data(train_path, train_path)
+    train = pd.read_csv(train_path)
     train = preprocess_data(train)
     train = drop_missing_target(train)
     return train
