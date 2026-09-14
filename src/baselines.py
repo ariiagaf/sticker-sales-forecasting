@@ -83,7 +83,10 @@ def ridge_calendar_predict(
     ]
     categorical_features = GROUP_COLS
 
-    encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    try:
+        encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    except TypeError:
+        encoder = OneHotEncoder(handle_unknown="ignore", sparse=False)
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", StandardScaler(), numeric_features),
