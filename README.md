@@ -2,6 +2,24 @@
 
 Forecasting Sticker Sales Kaggle project.
 
+## Setup
+
+Use Python 3.10 or newer.
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Download the Kaggle competition data and place the files in `data/`:
+
+```text
+data/train.csv
+data/test.csv
+data/sample_submission.csv
+```
+
 ## Data Pipeline
 
 The project uses a shared preprocessing, feature engineering, validation, and evaluation pipeline implemented in `src/`.
@@ -132,3 +150,23 @@ print(score)
 The function returns MAPE in percent.
 
 All baseline and proposed models should use the implementation from `src/metrics.py` so that reported results are directly comparable.
+
+## Baselines
+
+The baseline models are implemented in `src/baselines.py`:
+
+- `group_median`: median `num_sold` for each country-store-product group;
+- `seasonal_naive_last_year`: sales from the same date in the previous year, with group median fallback;
+- `ridge_calendar_one_hot`: Ridge regression on calendar features and one-hot encoded categorical variables.
+
+Run baseline evaluation:
+
+```bash
+python -m src.baselines
+```
+
+The script uses expanding-window validation and long-horizon validation, then saves results to:
+
+```text
+results/metrics.csv
+```
