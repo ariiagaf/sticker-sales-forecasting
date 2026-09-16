@@ -3,3 +3,10 @@ numpy
 matplotlib
 scikit-learn
 catboost
+jupyter
+ipykernel
+
+# Optional: only needed if you want to run notebooks non-interactively
+# for the reproducibility check (as mentioned in 03_model.ipynb's own
+# Reproducibility note: "pip install ipykernel nbclient"):
+# nbclient
