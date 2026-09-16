@@ -154,7 +154,7 @@ methodology and error analysis are in `project.pdf`.
 
 ## Reproducing the results end-to-end
 
-1. `git clone https://github.com/ariiagaf/sticker-sales-forecasting.git && cd sticker-sales-forecasting`
+1. Clone this repository and `cd` into the project root
 2. `python -m venv .venv && source .venv/bin/activate`
 3. `pip install -r requirements.txt`
 4. Place `train.csv` / `test.csv` in `data/`
