@@ -5,6 +5,7 @@ MODEL_NAME = "catboost_log"
 MODEL_VERSION = "v2"
 TARGET_COL = "num_sold"
 TARGET_TRANSFORM = "log1p"
+SUPPORTED_TARGET_TRANSFORMS = ("none", "log1p")
 
 CATEGORICAL_FEATURES = [
     "country",
@@ -57,7 +58,59 @@ def create_model(params: dict | None = None) -> CatBoostRegressor:
         **model_params,
     )
 
-def fit_model(train_features, params: dict | None = None) -> CatBoostRegressor:
+
+def _validate_target_transform(target_transform: str) -> None:
+    if target_transform not in SUPPORTED_TARGET_TRANSFORMS:
+        supported = ", ".join(SUPPORTED_TARGET_TRANSFORMS)
+        raise ValueError(
+            f"Unsupported target_transform: {target_transform!r}. "
+            f"Expected one of: {supported}."
+        )
+
+
+def _transform_target(target, target_transform: str) -> np.ndarray:
+    _validate_target_transform(target_transform)
+
+    transformed = np.asarray(target, dtype=float)
+    if target_transform == "log1p":
+        if np.any(transformed <= -1):
+            raise ValueError(
+                "log1p target transform requires target values greater than -1."
+            )
+        transformed = np.log1p(transformed)
+
+    if not np.isfinite(transformed).all():
+        raise ValueError("Transformed target contains NaN or infinite values.")
+
+    return transformed
+
+
+def _inverse_transform_predictions(
+    predictions,
+    target_transform: str,
+) -> np.ndarray:
+    _validate_target_transform(target_transform)
+
+    transformed = np.asarray(predictions, dtype=float)
+    if target_transform == "log1p":
+        transformed = np.expm1(transformed)
+
+    if not np.isfinite(transformed).all():
+        raise ValueError(
+            "Predictions contain NaN or infinite values after inverse transform."
+        )
+
+    return transformed
+
+
+def fit_model(
+    train_features,
+    params: dict | None = None,
+    *,
+    target_transform: str = TARGET_TRANSFORM,
+) -> CatBoostRegressor:
+    _validate_target_transform(target_transform)
+
     required_columns = FEATURE_COLS + [TARGET_COL]
     missing_columns = [
         column
@@ -73,7 +126,10 @@ def fit_model(train_features, params: dict | None = None) -> CatBoostRegressor:
     if train_features[required_columns].isna().any().any():
         raise ValueError("Training features or target contain missing values.")
 
-    target = np.log1p(train_features[TARGET_COL]).to_numpy(dtype=float)
+    target = _transform_target(
+        train_features[TARGET_COL],
+        target_transform,
+    )
 
     model = create_model(params)
     model.fit(
@@ -82,7 +138,15 @@ def fit_model(train_features, params: dict | None = None) -> CatBoostRegressor:
     )
     return model
 
-def predict_model(model: CatBoostRegressor, features) -> np.ndarray:
+
+def predict_model(
+    model: CatBoostRegressor,
+    features,
+    *,
+    target_transform: str = TARGET_TRANSFORM,
+) -> np.ndarray:
+    _validate_target_transform(target_transform)
+
     missing_columns = [
         column
         for column in FEATURE_COLS
@@ -97,27 +161,24 @@ def predict_model(model: CatBoostRegressor, features) -> np.ndarray:
     if features[FEATURE_COLS].isna().any().any():
         raise ValueError("Prediction features contain missing values.")
 
-    log_predictions = np.asarray(
+    model_predictions = np.asarray(
         model.predict(features[FEATURE_COLS]),
         dtype=float,
     )
 
-    if log_predictions.shape != (len(features),):
+    if model_predictions.shape != (len(features),):
         raise ValueError("Expected one prediction per input row.")
 
+    if not np.isfinite(model_predictions).all():
+        raise ValueError("Model predictions contain NaN or infinite values.")
 
-    if not np.isfinite(log_predictions).all():
-        raise ValueError("Log predictions contain NaN or infinite values.")
-
-    predictions = np.expm1(log_predictions)
-
-    if not np.isfinite(predictions).all():
-        raise ValueError(
-            "Predictions contain NaN or infinite values after inverse transform."
-        )
+    predictions = _inverse_transform_predictions(
+        model_predictions,
+        target_transform,
+    )
 
     negative_count = int((predictions < 0).sum())
-    
+
     if negative_count:
         print(
             f"Clipping {negative_count} negative predictions to zero "
