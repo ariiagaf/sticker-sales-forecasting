@@ -1,5 +1,4 @@
 import argparse
-import json
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +11,19 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from src.features import add_date_features
 from src.metrics import mape
 from src.preprocessing import drop_missing_target, preprocess_data
-from src.validation import expanding_window_splits, temporal_train_val_split
+from src.results import (
+    SCHEME_TEST,
+    SCHEME_VALIDATION,
+    make_record,
+    save_predictions,
+    upsert_metrics,
+)
+from src.validation import (
+    expanding_window_splits,
+    fold_name,
+    split_development_test,
+    test_name,
+)
 
 
 TARGET_COL = "num_sold"
@@ -34,26 +45,74 @@ def group_median_predict(
     return pred["prediction"].fillna(fallback).to_numpy()
 
 
+def _last_year_history(train_df: pd.DataFrame) -> pd.DataFrame:
+    """Training sales shifted forward by one calendar year.
+
+    A row dated D in train becomes a candidate forecast for D + 1 year.
+    Only the dates that exist in train are shifted, so a forecast for a date
+    is only available if that date minus one year is inside the training data.
+    (29 Feb shifts onto 28 Feb; the real 28 Feb of the previous year is kept.)
+    """
+    history = (
+        train_df[["date", *GROUP_COLS, TARGET_COL]]
+        .sort_values("date")
+        .copy()
+    )
+    history["date"] = history["date"] + pd.DateOffset(years=1)
+    history = history.rename(columns={TARGET_COL: "prediction"})
+    return history.drop_duplicates(subset=["date", *GROUP_COLS], keep="first")
+
+
 def seasonal_naive_predict(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
 ) -> np.ndarray:
-    history = train_df[["date", *GROUP_COLS, TARGET_COL]].copy()
-    history["date"] = history["date"] + pd.DateOffset(years=1)
-    history = history.rename(columns={TARGET_COL: "prediction"})
+    """Value of the same date one year earlier, group median if unavailable.
+
+    The only data used is `train_df` (everything strictly before val_df), so
+    no future information is used. For a one-year evaluation window, the value
+    for each date comes from the actual sales of the previous year. If the
+    evaluation window is longer than one year, dates beyond the first year have
+    no previous-year value in train_df and silently use the group median
+    (see `seasonal_naive_coverage`).
+    """
+    history = _last_year_history(train_df)
 
     pred = val_df[["date", *GROUP_COLS]].merge(
         history,
         on=["date", *GROUP_COLS],
         how="left",
     )
+    if len(pred) != len(val_df):
+        raise AssertionError("Seasonal naive merge changed the number of rows.")
 
     missing_mask = pred["prediction"].isna()
     if missing_mask.any():
-        fallback = group_median_predict(train_df, val_df.loc[missing_mask])
+        fallback = group_median_predict(
+            train_df, val_df.loc[missing_mask.to_numpy()]
+        )
         pred.loc[missing_mask, "prediction"] = fallback
 
     return pred["prediction"].to_numpy()
+
+
+def seasonal_naive_coverage(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+) -> dict:
+    """How many forecasts come from real last-year sales vs. the fallback."""
+    history = _last_year_history(train_df)
+    pred = val_df[["date", *GROUP_COLS]].merge(
+        history, on=["date", *GROUP_COLS], how="left"
+    )
+    from_last_year = int(pred["prediction"].notna().sum())
+    total = int(len(pred))
+    return {
+        "rows": total,
+        "from_last_year": from_last_year,
+        "fallback_group_median": total - from_last_year,
+        "share_from_last_year": round(from_last_year / total, 6),
+    }
 
 
 def ridge_calendar_predict(
@@ -132,92 +191,75 @@ BASELINES = [
 ]
 
 
-def _period_text(df: pd.DataFrame) -> str:
-    return f"{df['date'].min().date()} to {df['date'].max().date()}"
-
-
-def _evaluate_split(
-    model_name: str,
-    version: str,
-    params: dict,
-    predict_func,
-    train_part: pd.DataFrame,
-    val_part: pd.DataFrame,
-    validation_scheme: str,
-    fold: str,
-) -> dict:
-    prediction = predict_func(train_part, val_part)
-    score = mape(val_part[TARGET_COL], prediction)
-
-    return {
-        "model": model_name,
-        "version": version,
-        "validation_scheme": validation_scheme,
-        "fold": fold,
-        "train_period": _period_text(train_part),
-        "validation_period": _period_text(val_part),
-        "mape": round(score, 6),
-        "params": json.dumps(params, sort_keys=True),
-    }
-
-
 def evaluate_baselines(
-    train_df: pd.DataFrame,
-    include_long_horizon: bool = True,
-) -> pd.DataFrame:
+    df: pd.DataFrame,
+    results_dir: str | Path | None = "results",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Evaluate all baselines with the shared temporal scheme.
+
+    Returns (metrics, seasonal_coverage). With `results_dir` set, metrics rows
+    and the predictions of every split are written there.
+
+    Every baseline is trained / evaluated on exactly the same splits as the
+    CatBoost models: expanding-window validation folds, and the independent
+    test year (fit on all development data, scored once).
+    """
+    dev_df, test_df = split_development_test(df)
+
+    splits = []
+    for number, (train_part, val_part) in enumerate(
+        expanding_window_splits(dev_df), start=1
+    ):
+        splits.append(
+            (SCHEME_VALIDATION, fold_name(number, val_part), train_part, val_part)
+        )
+    splits.append((SCHEME_TEST, test_name(), dev_df, test_df))
+
     records = []
+    coverage_rows = []
 
     for baseline in BASELINES:
-        for fold_number, (train_part, val_part) in enumerate(
-            expanding_window_splits(train_df),
-            start=1,
-        ):
-            validation_year = val_part["date"].dt.year.iloc[0]
+        for scheme, split_label, train_part, eval_part in splits:
+            prediction = baseline["predict"](train_part, eval_part)
+            score = mape(eval_part[TARGET_COL], prediction)
             records.append(
-                _evaluate_split(
-                    model_name=baseline["model"],
-                    version=baseline["version"],
-                    params=baseline["params"],
-                    predict_func=baseline["predict"],
-                    train_part=train_part,
-                    val_part=val_part,
-                    validation_scheme="expanding_window",
-                    fold=f"fold_{fold_number}_{validation_year}",
+                make_record(
+                    baseline["model"],
+                    baseline["version"],
+                    scheme,
+                    split_label,
+                    train_part,
+                    eval_part,
+                    score,
+                    baseline["params"],
                 )
             )
-
-        if include_long_horizon:
-            train_part, val_part = temporal_train_val_split(
-                train_df,
-                val_start_date="2014-01-01",
-            )
-            records.append(
-                _evaluate_split(
-                    model_name=baseline["model"],
-                    version=baseline["version"],
-                    params=baseline["params"],
-                    predict_func=baseline["predict"],
-                    train_part=train_part,
-                    val_part=val_part,
-                    validation_scheme="long_horizon",
-                    fold="2014_2016",
+            if results_dir is not None:
+                save_predictions(
+                    results_dir,
+                    baseline["model"],
+                    split_label,
+                    eval_part,
+                    prediction,
                 )
-            )
+            if baseline["model"] == "seasonal_naive_last_year":
+                coverage_rows.append(
+                    {
+                        "split": split_label,
+                        **seasonal_naive_coverage(train_part, eval_part),
+                    }
+                )
 
-    return pd.DataFrame(records)
+    metrics = pd.DataFrame(records)
+    coverage = pd.DataFrame(coverage_rows)
 
+    if results_dir is not None:
+        upsert_metrics(metrics, Path(results_dir) / "metrics.csv")
+        coverage.to_csv(
+            Path(results_dir) / "seasonal_naive_coverage.csv", index=False
+        )
 
-def save_metrics(metrics_df: pd.DataFrame, output_path: str | Path) -> None:
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if output_path.exists() and output_path.stat().st_size > 1:
-        old_metrics = pd.read_csv(output_path)
-        baseline_names = set(metrics_df["model"])
-        old_metrics = old_metrics[~old_metrics["model"].isin(baseline_names)]
-        metrics_df = pd.concat([old_metrics, metrics_df], ignore_index=True)
-
-    metrics_df.to_csv(output_path, index=False)
+    return metrics, coverage
 
 
 def load_training_data(train_path: str | Path) -> pd.DataFrame:
@@ -230,25 +272,21 @@ def load_training_data(train_path: str | Path) -> pd.DataFrame:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--train-path", default="data/train.csv")
-    parser.add_argument("--output-path", default="results/metrics.csv")
-    parser.add_argument("--no-long-horizon", action="store_true")
+    parser.add_argument("--results-dir", default="results")
     args = parser.parse_args()
 
     train_df = load_training_data(args.train_path)
-    metrics_df = evaluate_baselines(
-        train_df,
-        include_long_horizon=not args.no_long_horizon,
-    )
-    save_metrics(metrics_df, args.output_path)
+    metrics_df, coverage = evaluate_baselines(train_df, args.results_dir)
 
     summary = (
         metrics_df.groupby(["model", "validation_scheme"])["mape"]
         .mean()
-        .reset_index()
-        .sort_values(["validation_scheme", "mape"])
+        .unstack("validation_scheme")
     )
-    print(summary.to_string(index=False))
-    print(f"\nSaved metrics to {args.output_path}")
+    print(summary.round(4).to_string())
+    print("\nSeasonal naive: share of forecasts from real last-year sales")
+    print(coverage.to_string(index=False))
+    print(f"\nSaved metrics and predictions to {args.results_dir}/")
 
 
 if __name__ == "__main__":

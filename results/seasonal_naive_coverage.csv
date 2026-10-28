@@ -1,0 +1,5 @@
+split,rows,from_last_year,fallback_group_median,share_from_last_year
+fold_1_2013,31721,31529,192,0.993947
+fold_2_2014,31823,31617,206,0.993527
+fold_3_2015,31643,31567,76,0.997598
+test_2016,31767,31519,248,0.992193
