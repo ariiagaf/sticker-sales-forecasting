@@ -1,11 +1,39 @@
+"""CatBoost model with two interchangeable target modes.
+
+    catboost_raw : CatBoost trained on the original `num_sold`
+    catboost_log : CatBoost trained on log1p(num_sold), predictions mapped back
+                   to the original scale with expm1
+
+Both modes share one interface:
+
+    model = fit_model(train_df, params=None, target_transform="none" | "log1p")
+    pred  = predict_model(model, features_df)   # always in original units
+
+The fitted model remembers its own target transform, so `predict_model` always
+returns predictions on the original `num_sold` scale (clipped at 0).
+"""
+
+from __future__ import annotations
+
 import numpy as np
 from catboost import CatBoostRegressor
 
+TARGET_COL = "num_sold"
+TARGET_TRANSFORMS = ("none", "log1p")
+
+# model name -> (version, target transform). Names/versions are the ones used
+# in results/metrics.csv.
+MODEL_REGISTRY = {
+    "catboost_raw": {"version": "v1", "target_transform": "none"},
+    "catboost_log": {"version": "v2", "target_transform": "log1p"},
+    "catboost_raw_tuned": {"version": "v3", "target_transform": "none"},
+    "catboost_log_tuned": {"version": "v3", "target_transform": "log1p"},
+}
+
+# Kept for backwards compatibility with older notebooks.
 MODEL_NAME = "catboost_log"
 MODEL_VERSION = "v2"
-TARGET_COL = "num_sold"
 TARGET_TRANSFORM = "log1p"
-SUPPORTED_TARGET_TRANSFORMS = ("none", "log1p")
 
 CATEGORICAL_FEATURES = [
     "country",
@@ -48,6 +76,32 @@ DEFAULT_PARAMS = {
 }
 
 
+def _check_transform(target_transform: str) -> None:
+    if target_transform not in TARGET_TRANSFORMS:
+        raise ValueError(
+            f"Unknown target_transform {target_transform!r}; "
+            f"expected one of {TARGET_TRANSFORMS}."
+        )
+
+
+def transform_target(y, target_transform: str) -> np.ndarray:
+    """Original scale -> model scale."""
+    _check_transform(target_transform)
+    y = np.asarray(y, dtype=float)
+    if target_transform == "log1p":
+        return np.log1p(y)
+    return y
+
+
+def inverse_transform_target(y_model_scale, target_transform: str) -> np.ndarray:
+    """Model scale -> original scale (no clipping)."""
+    _check_transform(target_transform)
+    y = np.asarray(y_model_scale, dtype=float)
+    if target_transform == "log1p":
+        return np.expm1(y)
+    return y
+
+
 def create_model(params: dict | None = None) -> CatBoostRegressor:
     model_params = DEFAULT_PARAMS.copy()
     if params is not None:
@@ -59,63 +113,20 @@ def create_model(params: dict | None = None) -> CatBoostRegressor:
     )
 
 
-def _validate_target_transform(target_transform: str) -> None:
-    if target_transform not in SUPPORTED_TARGET_TRANSFORMS:
-        supported = ", ".join(SUPPORTED_TARGET_TRANSFORMS)
-        raise ValueError(
-            f"Unsupported target_transform: {target_transform!r}. "
-            f"Expected one of: {supported}."
-        )
-
-
-def _transform_target(target, target_transform: str) -> np.ndarray:
-    _validate_target_transform(target_transform)
-
-    transformed = np.asarray(target, dtype=float)
-    if target_transform == "log1p":
-        if np.any(transformed <= -1):
-            raise ValueError(
-                "log1p target transform requires target values greater than -1."
-            )
-        transformed = np.log1p(transformed)
-
-    if not np.isfinite(transformed).all():
-        raise ValueError("Transformed target contains NaN or infinite values.")
-
-    return transformed
-
-
-def _inverse_transform_predictions(
-    predictions,
-    target_transform: str,
-) -> np.ndarray:
-    _validate_target_transform(target_transform)
-
-    transformed = np.asarray(predictions, dtype=float)
-    if target_transform == "log1p":
-        transformed = np.expm1(transformed)
-
-    if not np.isfinite(transformed).all():
-        raise ValueError(
-            "Predictions contain NaN or infinite values after inverse transform."
-        )
-
-    return transformed
-
-
 def fit_model(
     train_features,
     params: dict | None = None,
-    *,
-    target_transform: str = TARGET_TRANSFORM,
+    target_transform: str = "log1p",
 ) -> CatBoostRegressor:
-    _validate_target_transform(target_transform)
+    """Fit CatBoost on `target_transform(num_sold)`.
+
+    target_transform: "none" (raw target) or "log1p".
+    """
+    _check_transform(target_transform)
 
     required_columns = FEATURE_COLS + [TARGET_COL]
     missing_columns = [
-        column
-        for column in required_columns
-        if column not in train_features.columns
+        column for column in required_columns if column not in train_features.columns
     ]
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
@@ -126,31 +137,35 @@ def fit_model(
     if train_features[required_columns].isna().any().any():
         raise ValueError("Training features or target contain missing values.")
 
-    target = _transform_target(
-        train_features[TARGET_COL],
-        target_transform,
-    )
+    if target_transform == "log1p" and (train_features[TARGET_COL] < 0).any():
+        raise ValueError("log1p target requires non-negative num_sold.")
+
+    target = transform_target(train_features[TARGET_COL], target_transform)
 
     model = create_model(params)
-    model.fit(
-        train_features[FEATURE_COLS],
-        target,
-    )
+    model.fit(train_features[FEATURE_COLS], target)
+    # remembered so that predict_model maps predictions back correctly
+    model.target_transform_ = target_transform
     return model
 
 
 def predict_model(
     model: CatBoostRegressor,
     features,
-    *,
-    target_transform: str = TARGET_TRANSFORM,
+    target_transform: str | None = None,
+    verbose: bool = False,
 ) -> np.ndarray:
-    _validate_target_transform(target_transform)
+    """Predict in ORIGINAL units of num_sold (negative values clipped to 0)."""
+    if target_transform is None:
+        target_transform = getattr(model, "target_transform_", None)
+        if target_transform is None:
+            raise ValueError(
+                "Model has no target_transform_; pass target_transform explicitly."
+            )
+    _check_transform(target_transform)
 
     missing_columns = [
-        column
-        for column in FEATURE_COLS
-        if column not in features.columns
+        column for column in FEATURE_COLS if column not in features.columns
     ]
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
@@ -161,25 +176,22 @@ def predict_model(
     if features[FEATURE_COLS].isna().any().any():
         raise ValueError("Prediction features contain missing values.")
 
-    model_predictions = np.asarray(
-        model.predict(features[FEATURE_COLS]),
-        dtype=float,
-    )
+    raw_output = np.asarray(model.predict(features[FEATURE_COLS]), dtype=float)
 
-    if model_predictions.shape != (len(features),):
+    if raw_output.shape != (len(features),):
         raise ValueError("Expected one prediction per input row.")
+    if not np.isfinite(raw_output).all():
+        raise ValueError("Model output contains NaN or infinite values.")
 
-    if not np.isfinite(model_predictions).all():
-        raise ValueError("Model predictions contain NaN or infinite values.")
+    predictions = inverse_transform_target(raw_output, target_transform)
 
-    predictions = _inverse_transform_predictions(
-        model_predictions,
-        target_transform,
-    )
+    if not np.isfinite(predictions).all():
+        raise ValueError(
+            "Predictions contain NaN or infinite values after inverse transform."
+        )
 
     negative_count = int((predictions < 0).sum())
-
-    if negative_count:
+    if negative_count and verbose:
         print(
             f"Clipping {negative_count} negative predictions to zero "
             f"(raw minimum: {predictions.min():.6f})."

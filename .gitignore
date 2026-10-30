@@ -18,3 +18,5 @@ __pycache__/
 
 # macOS
 .DS_Store
+# temporary virtual environment created by scripts/clean_env_check.sh
+.venv_check/

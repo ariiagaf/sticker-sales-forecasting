@@ -19,8 +19,8 @@ def add_date_features(df: pd.DataFrame) -> pd.DataFrame:
     df["year"] = df["date"].dt.year
     df["month"] = df["date"].dt.month
     df["day"] = df["date"].dt.day
-    df["day_of_week"] = df["date"].dt.dayofweek
-    df["day_of_year"] = df["date"].dt.dayofyear
+    df["day_of_week"] = df["date"].dt.day_of_week
+    df["day_of_year"] = df["date"].dt.day_of_year
     df["week_of_year"] = df["date"].dt.isocalendar().week.astype(int)
     df["quarter"] = df["date"].dt.quarter
 
