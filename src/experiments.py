@@ -53,8 +53,9 @@ def prepare_data(train_path: str | Path) -> pd.DataFrame:
 
 
 def _record_params(params: dict, target_transform: str) -> dict:
+    """Record every explicitly configured training option, including defaults."""
     return {
-        **{k: v for k, v in DEFAULT_PARAMS.items() if k in ("loss_function", "random_seed")},
+        **DEFAULT_PARAMS,
         **params,
         "target_transform": target_transform,
         "features": FEATURE_COLS,
