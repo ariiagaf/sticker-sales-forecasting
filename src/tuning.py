@@ -77,7 +77,11 @@ def tune_catboost(
         for number, (train_part, val_part) in enumerate(folds, start=1):
             label = fold_name(number, val_part)
             model = fit_model(train_part, params=params, target_transform=target_transform)
-            y_pred = predict_model(model, val_part)
+            # Match the transform passed to fit_model explicitly so tuning
+            # cannot accidentally score predictions on the wrong scale.
+            y_pred = predict_model(
+                model, val_part, target_transform=target_transform
+            )
             fold_scores[label] = mape(val_part[TARGET_COL].to_numpy(), y_pred)
             predictions[(candidate["name"], label)] = (val_part, y_pred)
 

@@ -78,7 +78,10 @@ def evaluate_default(
     for number, (train_part, val_part) in enumerate(expanding_window_splits(dev_df), start=1):
         label = fold_name(number, val_part)
         model = fit_model(train_part, params=params, target_transform=transform)
-        y_pred = predict_model(model, val_part)
+        # Keep the target scale explicit at prediction time too.  This makes
+        # the raw/log experiment definition self-contained rather than
+        # relying only on the fitted model attribute.
+        y_pred = predict_model(model, val_part, target_transform=transform)
         score = mape(val_part[TARGET_COL].to_numpy(), y_pred)
         records.append(
             make_record(
@@ -107,7 +110,8 @@ def evaluate_on_test(
     params = params or {}
 
     model = fit_model(dev_df, params=params, target_transform=transform)
-    y_pred = predict_model(model, test_df)
+    # Use the same explicit transform as at fit time for the independent test.
+    y_pred = predict_model(model, test_df, target_transform=transform)
     score = mape(test_df[TARGET_COL].to_numpy(), y_pred)
 
     record = make_record(
