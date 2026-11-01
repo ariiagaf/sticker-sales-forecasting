@@ -1,0 +1,30 @@
+name: Role 5 final verification
+
+on:
+  push:
+    branches:
+      - fix/w3-error-analysis-reproducibility
+
+jobs:
+  final-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Download Kaggle training data
+        run: |
+          mkdir -p data
+          curl -L --fail --retry 3 https://raw.githubusercontent.com/NevroHelios/sales-forecasting/main/data/train.csv -o data/train.csv
+      - name: Run tests
+        run: python -m pytest -q tests
+      - name: Execute final evaluation notebook
+        run: |
+          jupyter nbconvert --to notebook --execute notebooks/04_evaluation.ipynb \
+            --output /tmp/04_evaluation.executed.ipynb \
+            --ExecutePreprocessor.timeout=600
