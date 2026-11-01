@@ -16,18 +16,6 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Download public copy of Kaggle training data
-        run: |
-          mkdir -p data
-          curl -L --fail --retry 3             https://raw.githubusercontent.com/NevroHelios/sales-forecasting/main/data/train.csv             -o data/train.csv
-          python - <<'PY'
-          import pandas as pd
-          df = pd.read_csv("data/train.csv")
-          print("shape:", df.shape)
-          print("date range:", df["date"].min(), df["date"].max())
-          print("columns:", list(df.columns))
-          PY
-
       - name: Install current project requirements plus test runner
         run: |
           python -m pip install --upgrade pip
@@ -41,6 +29,18 @@ jobs:
                   print(f"{p}=={metadata.version(p)}")
               except metadata.PackageNotFoundError:
                   print(f"{p}=NOT_INSTALLED")
+          PY
+
+      - name: Download public copy of Kaggle training data
+        run: |
+          mkdir -p data
+          curl -L --fail --retry 3 https://raw.githubusercontent.com/NevroHelios/sales-forecasting/main/data/train.csv -o data/train.csv
+          python - <<'PY'
+          import pandas as pd
+          df = pd.read_csv("data/train.csv")
+          print("shape:", df.shape)
+          print("date range:", df["date"].min(), df["date"].max())
+          print("columns:", list(df.columns))
           PY
 
       - name: Run tests
