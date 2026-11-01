@@ -1,0 +1,57 @@
+name: Role 5 reproducibility check
+
+on:
+  push:
+    branches:
+      - fix/w3-error-analysis-reproducibility
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Download public copy of Kaggle training data
+        run: |
+          mkdir -p data
+          curl -L --fail --retry 3             https://raw.githubusercontent.com/NevroHelios/sales-forecasting/main/data/train.csv             -o data/train.csv
+          python - <<'PY'
+          import pandas as pd
+          df = pd.read_csv("data/train.csv")
+          print("shape:", df.shape)
+          print("date range:", df["date"].min(), df["date"].max())
+          print("columns:", list(df.columns))
+          PY
+
+      - name: Install current project requirements plus test runner
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+          python - <<'PY'
+          import sys
+          from importlib import metadata
+          print("Python:", sys.version)
+          for p in ["pandas","numpy","matplotlib","scikit-learn","catboost","jupyter","ipykernel","nbclient","pytest"]:
+              try:
+                  print(f"{p}=={metadata.version(p)}")
+              except metadata.PackageNotFoundError:
+                  print(f"{p}=NOT_INSTALLED")
+          PY
+
+      - name: Run tests
+        run: python -m pytest -q tests
+
+      - name: Run two full pipelines and compare outputs
+        run: python -m src.repro_check --train-path data/train.csv --final-results-dir results
+
+      - name: Show reproducibility record
+        if: always()
+        run: |
+          if [ -f results/reproducibility_check.md ]; then
+            cat results/reproducibility_check.md
+          fi
