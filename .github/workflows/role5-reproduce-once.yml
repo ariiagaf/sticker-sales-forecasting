@@ -1,0 +1,58 @@
+name: Role 5 reproduce committed results
+
+on:
+  push:
+    branches:
+      - fix/w3-error-analysis-reproducibility
+
+jobs:
+  reproduce-once:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install verified dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest nbclient
+
+      - name: Download public copy of Kaggle training data
+        run: |
+          mkdir -p data
+          curl -L --fail --retry 3 https://raw.githubusercontent.com/NevroHelios/sales-forecasting/main/data/train.csv -o data/train.csv
+
+      - name: Run tests
+        run: python -m pytest -q tests
+
+      - name: Run full pipeline once in a clean results directory
+        run: |
+          cp results/metrics.csv /tmp/expected_metrics.csv
+          python -m src.pipeline --train-path data/train.csv --results-dir /tmp/reproduced
+
+      - name: Compare regenerated metrics with committed metrics
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          import numpy as np
+
+          keys = ["model", "version", "validation_scheme", "fold"]
+          expected = pd.read_csv("/tmp/expected_metrics.csv").set_index(keys).sort_index()
+          actual = pd.read_csv("/tmp/reproduced/metrics.csv").set_index(keys).sort_index()
+
+          if not expected.index.equals(actual.index):
+              missing = expected.index.difference(actual.index)
+              extra = actual.index.difference(expected.index)
+              raise SystemExit(f"Metric rows differ. Missing={list(missing)}, extra={list(extra)}")
+
+          diff = (expected["mape"] - actual["mape"]).abs()
+          print("ROLE5_MAX_MAPE_DIFF", float(diff.max()))
+          print("ROLE5_ROWS", len(actual))
+          print(actual[["mape"]].to_string())
+
+          if not np.allclose(expected["mape"], actual["mape"], rtol=0, atol=1e-9):
+              raise SystemExit("Regenerated MAPE values do not match committed results")
+          PY
