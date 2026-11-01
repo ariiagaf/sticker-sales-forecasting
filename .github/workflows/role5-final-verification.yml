@@ -23,8 +23,29 @@ jobs:
           curl -L --fail --retry 3 https://raw.githubusercontent.com/NevroHelios/sales-forecasting/main/data/train.csv -o data/train.csv
       - name: Run tests
         run: python -m pytest -q tests
+      - name: Preserve committed error-analysis artifacts
+        run: |
+          cp results/error_analysis_worst_series.png /tmp/expected_plot.png
+          cp results/error_analysis_by_country.csv /tmp/expected_country.csv
+          cp results/error_analysis_by_country_year.csv /tmp/expected_country_year.csv
+          cp results/error_analysis_by_product.csv /tmp/expected_product.csv
+          cp results/error_analysis_by_store.csv /tmp/expected_store.csv
+          cp results/error_analysis_by_year.csv /tmp/expected_year.csv
+          cp results/error_analysis_norway_levels.csv /tmp/expected_norway.csv
+          cp results/error_analysis_worst_series.csv /tmp/expected_worst.csv
       - name: Execute final evaluation notebook
         run: |
           jupyter nbconvert --to notebook --execute notebooks/04_evaluation.ipynb \
             --output /tmp/04_evaluation.executed.ipynb \
             --ExecutePreprocessor.timeout=600
+      - name: Verify error-analysis tables and plot reproduce exactly
+        run: |
+          cmp /tmp/expected_plot.png results/error_analysis_worst_series.png
+          cmp /tmp/expected_country.csv results/error_analysis_by_country.csv
+          cmp /tmp/expected_country_year.csv results/error_analysis_by_country_year.csv
+          cmp /tmp/expected_product.csv results/error_analysis_by_product.csv
+          cmp /tmp/expected_store.csv results/error_analysis_by_store.csv
+          cmp /tmp/expected_year.csv results/error_analysis_by_year.csv
+          cmp /tmp/expected_norway.csv results/error_analysis_norway_levels.csv
+          cmp /tmp/expected_worst.csv results/error_analysis_worst_series.csv
+          echo "ROLE5_ERROR_ARTIFACTS_IDENTICAL yes"
