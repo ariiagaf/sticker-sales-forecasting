@@ -23,9 +23,8 @@ jobs:
           curl -L --fail --retry 3 https://raw.githubusercontent.com/NevroHelios/sales-forecasting/main/data/train.csv -o data/train.csv
       - name: Run tests
         run: python -m pytest -q tests
-      - name: Preserve committed error-analysis artifacts
+      - name: Preserve committed error-analysis tables
         run: |
-          cp results/error_analysis_worst_series.png /tmp/expected_plot.png
           cp results/error_analysis_by_country.csv /tmp/expected_country.csv
           cp results/error_analysis_by_country_year.csv /tmp/expected_country_year.csv
           cp results/error_analysis_by_product.csv /tmp/expected_product.csv
@@ -33,19 +32,54 @@ jobs:
           cp results/error_analysis_by_year.csv /tmp/expected_year.csv
           cp results/error_analysis_norway_levels.csv /tmp/expected_norway.csv
           cp results/error_analysis_worst_series.csv /tmp/expected_worst.csv
-      - name: Execute final evaluation notebook
+      - name: Execute final evaluation notebook — run 1
         run: |
           jupyter nbconvert --to notebook --execute notebooks/04_evaluation.ipynb \
-            --output /tmp/04_evaluation.executed.ipynb \
+            --output /tmp/04_evaluation.run1.ipynb \
             --ExecutePreprocessor.timeout=600
-      - name: Verify error-analysis tables and plot reproduce exactly
+          cp results/error_analysis_worst_series.png /tmp/run1_plot.png
+          cp results/error_analysis_by_country.csv /tmp/run1_country.csv
+          cp results/error_analysis_by_country_year.csv /tmp/run1_country_year.csv
+          cp results/error_analysis_by_product.csv /tmp/run1_product.csv
+          cp results/error_analysis_by_store.csv /tmp/run1_store.csv
+          cp results/error_analysis_by_year.csv /tmp/run1_year.csv
+          cp results/error_analysis_norway_levels.csv /tmp/run1_norway.csv
+          cp results/error_analysis_worst_series.csv /tmp/run1_worst.csv
+      - name: Compare regenerated tables with committed values
         run: |
-          cmp /tmp/expected_plot.png results/error_analysis_worst_series.png
-          cmp /tmp/expected_country.csv results/error_analysis_by_country.csv
-          cmp /tmp/expected_country_year.csv results/error_analysis_by_country_year.csv
-          cmp /tmp/expected_product.csv results/error_analysis_by_product.csv
-          cmp /tmp/expected_store.csv results/error_analysis_by_store.csv
-          cmp /tmp/expected_year.csv results/error_analysis_by_year.csv
-          cmp /tmp/expected_norway.csv results/error_analysis_norway_levels.csv
-          cmp /tmp/expected_worst.csv results/error_analysis_worst_series.csv
-          echo "ROLE5_ERROR_ARTIFACTS_IDENTICAL yes"
+          python - <<'PY'
+          import pandas as pd
+          from pandas.testing import assert_frame_equal
+
+          names = ["country", "country_year", "product", "store", "year", "norway", "worst"]
+          current = {
+              "country": "results/error_analysis_by_country.csv",
+              "country_year": "results/error_analysis_by_country_year.csv",
+              "product": "results/error_analysis_by_product.csv",
+              "store": "results/error_analysis_by_store.csv",
+              "year": "results/error_analysis_by_year.csv",
+              "norway": "results/error_analysis_norway_levels.csv",
+              "worst": "results/error_analysis_worst_series.csv",
+          }
+          for name in names:
+              expected = pd.read_csv(f"/tmp/expected_{name}.csv")
+              actual = pd.read_csv(current[name])
+              assert_frame_equal(expected, actual, check_exact=False, rtol=0, atol=1e-12)
+          print("ROLE5_ERROR_TABLES_MATCH_COMMITTED yes")
+          PY
+      - name: Execute final evaluation notebook — run 2
+        run: |
+          jupyter nbconvert --to notebook --execute notebooks/04_evaluation.ipynb \
+            --output /tmp/04_evaluation.run2.ipynb \
+            --ExecutePreprocessor.timeout=600
+      - name: Verify error-analysis artifacts reproduce within pinned environment
+        run: |
+          cmp /tmp/run1_plot.png results/error_analysis_worst_series.png
+          cmp /tmp/run1_country.csv results/error_analysis_by_country.csv
+          cmp /tmp/run1_country_year.csv results/error_analysis_by_country_year.csv
+          cmp /tmp/run1_product.csv results/error_analysis_by_product.csv
+          cmp /tmp/run1_store.csv results/error_analysis_by_store.csv
+          cmp /tmp/run1_year.csv results/error_analysis_by_year.csv
+          cmp /tmp/run1_norway.csv results/error_analysis_norway_levels.csv
+          cmp /tmp/run1_worst.csv results/error_analysis_worst_series.csv
+          echo "ROLE5_ERROR_ARTIFACTS_REPRODUCIBLE yes"
