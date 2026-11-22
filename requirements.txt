@@ -1,12 +1,9 @@
-pandas
-numpy
-matplotlib
-scikit-learn
-catboost
-jupyter
-ipykernel
-
-# Optional: only needed if you want to run notebooks non-interactively
-# for the reproducibility check (as mentioned in 03_model.ipynb's own
-# Reproducibility note: "pip install ipykernel nbclient"):
-# nbclient
+pandas==3.1.0
+numpy==2.5.4
+matplotlib==3.11.2
+scikit-learn==1.9.1
+catboost==1.2.10
+jupyter==1.1.1
+ipykernel==7.4.0
+nbclient==0.11.0
+pytest==9.2.0
